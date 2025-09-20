@@ -1,0 +1,15 @@
+[tool.ruff]
+# Match your local Python version (you said 3.13.x is installed)
+target-version = "py313"
+
+# Maximum allowed line length
+line-length = 100
+
+# Enable common linting rules (errors, warnings, imports)
+lint.select = ["E", "F", "W", "I"]
+
+# Ignore some rules that cause noise
+lint.ignore = [
+  "E203",  # Whitespace before ':'
+  "E501",  # Line too long (we let plot labels be long)
+]

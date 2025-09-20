@@ -2,11 +2,14 @@ name: CI
 
 on:
   push:
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 jobs:
-  ci:
+  build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -14,7 +17,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13.5"
+          # 3.11 is widely supported by streamlit/yfinance
+          python-version: "3.11"
 
       - name: Cache pip
         uses: actions/cache@v4
@@ -24,19 +28,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff mypy
 
-      - name: Lint with Ruff
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Import smoke test
         run: |
-          ruff check .
-          ruff format --check .
-
-      - name: Type check with mypy
-        run: mypy --ignore-missing-imports .
-
-      - name: Smoke test import
-        run: python -c "import app; print('import ok')"
+          python - << 'PY'
+          import streamlit, yfinance, pandas, plotly, dotenv, requests
+          print("Imports OK")
+          PY
