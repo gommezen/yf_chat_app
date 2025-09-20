@@ -255,7 +255,7 @@ with st.sidebar:
     st.subheader("How to use")
     st.markdown(SLASH_HELP)
     st.info("Tip: Toggle an LLM planner below for natural questions like 'compare TSLA and F last 6 months'.")
-    st.warning("Data via yfinance/Yahoo Finance for educational purposes only. Not investment advice.")
+    st.warning("Data via yfinance/Yahoo Finance for educational purposes only. May be delayed or inaccurate.")
 
     st.divider()
     st.subheader("LLM Settings")

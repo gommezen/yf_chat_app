@@ -36,4 +36,3 @@ Then choose **OpenAI** in the sidebar.
 
 ### Notes
 - Data from yfinance/Yahoo Finance may be delayed or incomplete.
-- No financial advice.

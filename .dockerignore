@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.log
+
+.streamlit/
+.env
+
+.git
+.gitignore
+
+dist/
+build/
+tests/
