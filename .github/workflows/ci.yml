@@ -4,9 +4,24 @@ on:
   push:
   pull_request:
 
+# Auto-cancel in-progress runs for the same ref
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Keep Streamlit quiet/headless in any Python invocation during CI
+  STREAMLIT_SERVER_HEADLESS: "1"
+  STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+
 jobs:
-  ci:
+  lint:
+    name: Lint / Format / Types
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,10 +54,46 @@ jobs:
       - name: Mypy (type check)
         run: mypy .
 
-      - name: Run tests
-        env:
-          # Make Streamlit quiet and headless in CI
-          STREAMLIT_SERVER_HEADLESS: "1"
-          STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', 'requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install deps
         run: |
-          pytest -vv --maxfail=1 -ra
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Smoke import app
+        run: |
+          python - <<'PY'
+          try:
+              import app  # noqa: F401
+              print("App import OK")
+          except Exception:
+              import traceback
+              traceback.print_exc()
+              raise
+          PY
+
+      - name: Run tests (if any)
+        if: ${{ hashFiles('tests/**/*.py') != '' }}
+        run: pytest -vv --maxfail=1 -ra
