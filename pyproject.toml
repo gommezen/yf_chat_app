@@ -2,16 +2,14 @@
 line-length = 100
 target-version = "py311"
 
-# Enable common linting rules (errors, warnings, imports)
+[tool.ruff.lint]
 select = ["E", "F", "W", "I"]
-
-# Ignore some rules that cause noise
 ignore = [
   "E203",  # Whitespace before ':'
-  "E501",  # Line too long (we let plot labels be long)
+  "E501",  # Line too long
 ]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["app"]
 combine-as-imports = true
 
