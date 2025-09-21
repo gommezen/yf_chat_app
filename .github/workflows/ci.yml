@@ -17,8 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # 3.11 is widely supported by streamlit/yfinance
-          python-version: "3.11"
+          python-version: "3.11"  # Streamlit & yfinance safe
 
       - name: Cache pip
         uses: actions/cache@v4
@@ -34,11 +33,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Lint (ruff)
-        run: ruff check .
+        run: ruff check . --output-format=github
 
       - name: Import smoke test
         run: |
           python - << 'PY'
           import streamlit, yfinance, pandas, plotly, dotenv, requests
-          print("Imports OK")
+          print("✅ Imports OK")
           PY
