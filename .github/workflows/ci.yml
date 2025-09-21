@@ -4,7 +4,6 @@ on:
   push:
   pull_request:
 
-# Auto-cancel in-progress runs for the same ref
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -13,9 +12,11 @@ permissions:
   contents: read
 
 env:
-  # Keep Streamlit quiet/headless in any Python invocation during CI
   STREAMLIT_SERVER_HEADLESS: "1"
   STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+  PYTHONUNBUFFERED: "1"
+  PYTEST_ADDOPTS: "--color=yes"
+  TZ: "UTC"
 
 jobs:
   lint:
@@ -49,7 +50,7 @@ jobs:
         run: ruff check .
 
       - name: Black (format check)
-        run: black --check .
+        run: black --check --diff .
 
       - name: Mypy (type check)
         run: mypy .
@@ -81,6 +82,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+          python - <<'PY'
+          import sys, platform, importlib
+          print("Python:", sys.version)
+          print("Platform:", platform.platform())
+          for pkg in ["pandas","yfinance","streamlit","plotly","pytest","ruff","black","mypy"]:
+              try:
+                  m = importlib.import_module(pkg)
+                  print(f"{pkg}: OK ({getattr(m,'__version__','?')})")
+              except Exception as e:
+                  print(f"{pkg}: FAIL -> {e}")
+          PY
 
       - name: Smoke import app
         run: |
@@ -96,4 +108,15 @@ jobs:
 
       - name: Run tests (if any)
         if: ${{ hashFiles('tests/**/*.py') != '' }}
-        run: pytest -vv --maxfail=1 -ra
+        run: |
+          set -o pipefail
+          pytest -vv -ra --maxfail=1 --disable-warnings --junitxml=pytest-report.xml | tee pytest-stdout.txt
+
+      - name: Upload pytest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-logs
+          path: |
+            pytest-report.xml
+            pytest-stdout.txt
