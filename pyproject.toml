@@ -1,9 +1,10 @@
 [tool.ruff]
-# Match your local Python version (you said 3.13.x is installed)
-target-version = "py313"
-
-# Maximum allowed line length
+target-version = "py311"
 line-length = 100
+
+lint.select = ["E", "F", "W", "I"]
+lint.ignore = ["E203", "E501"]  # optional: reduce noise
+
 
 # Enable common linting rules (errors, warnings, imports)
 lint.select = ["E", "F", "W", "I"]
