@@ -7,7 +7,6 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,25 +28,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-
-      - name: Show versions
-        run: |
-          python --version
-          ruff --version || true
-          black --version || true
-          mypy --version || true
-          pytest --version || true
+          pip install -r requirements-dev.txt
 
       - name: Ruff (lint)
-        run: ruff check . --output-format=github
+        run: ruff check .
 
       - name: Black (format check)
         run: black --check .
 
-      - name: MyPy (type check)
+      - name: Mypy (type check)
         run: mypy .
 
-      - name: Run tests (if any)
-        if: ${{ hashFiles('tests/**/*.py') != '' }}
-        run: pytest -q
+      - name: Run tests
+        env:
+          # Make Streamlit quiet and headless in CI
+          STREAMLIT_SERVER_HEADLESS: "1"
+          STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+        run: |
+          pytest -vv --maxfail=1 -ra
