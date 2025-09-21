@@ -27,11 +27,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install ruff pytest
+
+      - name: Show versions
+        run: |
+          python --version
+          ruff --version
+          pytest --version
 
       - name: Lint (ruff)
         run: ruff check . --output-format=github
@@ -40,7 +46,7 @@ jobs:
         run: |
           python - << 'PY'
           import streamlit, yfinance, pandas, plotly, dotenv, requests
-          print("Imports OK")
+          print("✅ Imports OK")
           PY
 
       - name: Run pytest
