@@ -2,10 +2,13 @@
 # TickerTalk — Streamlit chat app to talk to yfinance: quotes, history, dividends, splits, metadata, and news.
 # Optional: natural-language queries via OpenAI or Ollama (local, free). Otherwise supports simple slash-commands.
 
+from __future__ import annotations
+
 import json
 import os
 import re
 from datetime import date, datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any, Tuple, cast
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -15,24 +18,45 @@ import streamlit as st
 import yfinance as yf
 from dotenv import load_dotenv
 
-# Optional OpenAI
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
-
+# Load environment variables early
 load_dotenv()
+
+if TYPE_CHECKING:
+    # Only for static type checkers; not imported at runtime
+    from openai import OpenAI as OpenAIClient  # noqa: F401
+
+
+def _make_openai_client() -> Any:
+    """Create an OpenAI client if the package and API key are available; else None."""
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        return None
+    try:
+        from openai import OpenAI  # type: ignore[import-not-found, attr-defined]
+    except Exception:
+        return None
+    try:
+        return OpenAI(api_key=key)  # type: ignore[no-any-return, call-arg]
+    except Exception:
+        return None
+
+
+client_openai: Any = _make_openai_client()
+
+# Streamlit page config
 st.set_page_config(page_title="TickerTalk", page_icon="📈", layout="wide")
 
+
 # ---------------- Helpers & cache ----------------
-def _get_nested(d, *path, default=None):
-    cur = d
+def _get_nested(d: dict, *path: str, default: Any = None) -> Any:
+    cur: Any = d
     for p in path:
         if isinstance(cur, dict) and p in cur:
             cur = cur[p]
         else:
             return default
     return cur
+
 
 def _slug_from_url(url: str) -> str:
     try:
@@ -42,7 +66,8 @@ def _slug_from_url(url: str) -> str:
     except Exception:
         return "(untitled)"
 
-def _fmt_ts(ts) -> str:
+
+def _fmt_ts(ts: Any) -> str:
     if ts is None or ts == "":
         return ""
     # Try unix seconds
@@ -60,6 +85,7 @@ def _fmt_ts(ts) -> str:
         return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
         return ""
+
 
 def normalize_news_item(item: dict) -> dict:
     link = (
@@ -85,53 +111,62 @@ def normalize_news_item(item: dict) -> dict:
     summary = item.get("summary") or item.get("description") or item.get("content") or ""
     return {"link": link, "title": title, "publisher": publisher, "ts": ts, "summary": summary}
 
+
 @st.cache_data(show_spinner=False)
 def fetch_history(ticker: str, start: str, end: str, interval: str = "1d") -> pd.DataFrame:
     t = yf.Ticker(ticker)
-    df = t.history(start=start, end=end, interval=interval, auto_adjust=False)
+    # yfinance types are unannotated -> cast to DataFrame for MyPy
+    df = cast(pd.DataFrame, t.history(start=start, end=end, interval=interval, auto_adjust=False))
     if not df.empty:
         df = df.reset_index().rename(columns={"Date": "date"})
     return df
 
+
 @st.cache_data(show_spinner=False)
 def fetch_dividends(ticker: str) -> pd.DataFrame:
-    s = yf.Ticker(ticker).dividends
-    df = s.reset_index()
+    s = yf.Ticker(ticker).dividends  # Series-like (untyped)
+    df = cast(pd.DataFrame, s.reset_index())
     df.columns = ["date", "dividend"]
     return df
 
+
 @st.cache_data(show_spinner=False)
 def fetch_splits(ticker: str) -> pd.DataFrame:
-    s = yf.Ticker(ticker).splits
-    df = s.reset_index()
+    s = yf.Ticker(ticker).splits  # Series-like (untyped)
+    df = cast(pd.DataFrame, s.reset_index())
     df.columns = ["date", "split_ratio"]
     return df
+
 
 @st.cache_data(show_spinner=False)
 def fetch_info(ticker: str) -> dict:
     return yf.Ticker(ticker).info or {}
 
+
 @st.cache_data(show_spinner=False)
 def fetch_news(ticker: str) -> list:
     return yf.Ticker(ticker).news or []
 
+
 # ---------------- Utilities ----------------
-def normalize_ticker_arg(v):
-    note = None
-    ticker = None
+def normalize_ticker_arg(v: Any) -> Tuple[str | None, str | None]:
+    """Ensure ticker is a single symbol. If list provided, return first element and a note."""
+    note: str | None = None
+    ticker: str | None = None
     if isinstance(v, str):
         ticker = v
     elif isinstance(v, (list, tuple)) and v:
         ticker = str(v[0])
-        note = f"Multiple tickers provided ({', '.join(map(str, v))}); showing first: {ticker}. Use /compare for multi-ticker charts."
+        note = (
+            f"Multiple tickers provided ({', '.join(map(str, v))}); showing first: {ticker}. "
+            "Use /compare for multi-ticker charts."
+        )
     elif v is not None:
         ticker = str(v)
     return ticker, note
 
-# ---------------- LLM providers (optional) ----------------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client_openai = OpenAI(api_key=OPENAI_API_KEY) if (OpenAI and OPENAI_API_KEY) else None
 
+# ---------------- LLM providers (optional) ----------------
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q8_0")
 
@@ -159,12 +194,15 @@ SLASH_HELP = (
 
 INTERVALS = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1d", "5d", "1wk", "1mo", "3mo"}
 
-def one_year_range():
+
+def one_year_range() -> tuple[str, str]:
     today = date.today()
     return (today - timedelta(days=365)).isoformat(), today.isoformat()
 
+
 # Primitive parser for slash commands
 slash_re = re.compile(r"^/(price|dividends|splits|info|news|compare)\s+(.+)$", re.I)
+
 
 def parse_slash(message: str):
     m = slash_re.match(message.strip())
@@ -183,7 +221,10 @@ def parse_slash(message: str):
             end = parts[2]
         if len(parts) >= 4 and parts[3] in INTERVALS:
             interval = parts[3]
-        return {"action": "price", "args": {"ticker": ticker, "start": start, "end": end, "interval": interval}}
+        return {
+            "action": "price",
+            "args": {"ticker": ticker, "start": start, "end": end, "interval": interval},
+        }
 
     if action == "compare":
         t1, t2 = parts[0], parts[1]
@@ -194,11 +235,15 @@ def parse_slash(message: str):
             end = parts[3]
         if len(parts) >= 5 and parts[4] in INTERVALS:
             interval = parts[4]
-        return {"action": "compare", "args": {"tickers": [t1, t2], "start": start, "end": end, "interval": interval}}
+        return {
+            "action": "compare",
+            "args": {"tickers": [t1, t2], "start": start, "end": end, "interval": interval},
+        }
 
     else:
         ticker = parts[0]
         return {"action": action, "args": {"ticker": ticker}}
+
 
 # ---- LLM planners ----
 def plan_with_openai(message: str):
@@ -206,9 +251,11 @@ def plan_with_openai(message: str):
         return None
     today = date.today().isoformat()
     start_default = (date.today() - timedelta(days=365)).isoformat()
-    user_msg = f"TODAY={today}. If dates missing use start={start_default}, end={today}. Query: {message}"
+    user_msg = (
+        f"TODAY={today}. If dates missing use start={start_default}, end={today}. Query: {message}"
+    )
     try:
-        resp = client_openai.responses.create(
+        resp = client_openai.responses.create(  # type: ignore[attr-defined]
             model="gpt-4o-mini",
             input=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -216,14 +263,15 @@ def plan_with_openai(message: str):
             ],
             temperature=0,
         )
-        text = resp.output_text.strip()
+        text = resp.output_text.strip()  # type: ignore[attr-defined]
         left = text.find("{")
         right = text.rfind("}")
         if left != -1 and right != -1:
-            text = text[left:right+1]
+            text = text[left : right + 1]
         return json.loads(text)
     except Exception:
         return None
+
 
 def plan_with_ollama(message: str):
     try:
@@ -242,35 +290,55 @@ def plan_with_ollama(message: str):
         left = text.find("{")
         right = text.rfind("}")
         if left != -1 and right != -1:
-            text = text[left:right+1]
+            text = text[left : right + 1]
         return json.loads(text)
     except Exception:
         return None
 
+
 # ---------------- UI ----------------
 st.title("📈 TickerTalk")
-st.caption("Query stock data (quotes, history, dividends, splits, metadata, news). Optional natural language via OpenAI or local Ollama.")
+st.caption(
+    "Query stock data (quotes, history, dividends, splits, metadata, news). "
+    "Optional natural language via OpenAI or local Ollama."
+)
 
 with st.sidebar:
     st.subheader("How to use")
     st.markdown(SLASH_HELP)
-    st.info("Tip: Toggle an LLM planner below for natural questions like 'compare TSLA and F last 6 months'.")
-    st.warning("Data via yfinance/Yahoo Finance for educational purposes only. May be delayed or inaccurate.")
+    st.info(
+        "Tip: Toggle an LLM planner below for natural questions like 'compare TSLA and F last 6 months'."
+    )
+    st.warning(
+        "Data via yfinance/Yahoo Finance for educational purposes only. May be delayed or inaccurate."
+    )
 
     st.divider()
     st.subheader("LLM Settings")
-    use_llm = st.toggle("Use LLM planner", value=False, help="If off, only slash-commands are parsed.")
+    use_llm = st.toggle(
+        "Use LLM planner", value=False, help="If off, only slash-commands are parsed."
+    )
     provider = st.radio("Provider", ["None", "Ollama (local)", "OpenAI"], index=0, horizontal=False)
     if provider == "Ollama (local)":
         st.text_input("OLLAMA_URL", value=OLLAMA_URL, key="ollama_url_help")
         st.text_input("Model", value=OLLAMA_MODEL, key="ollama_model_help")
     elif provider == "OpenAI":
-        st.text_input("OPENAI_API_KEY", value=(OPENAI_API_KEY[:6] + "…" if OPENAI_API_KEY else ""), type="password", help="Set in .env")
+        _env_key = os.getenv("OPENAI_API_KEY")
+        st.text_input(
+            "OPENAI_API_KEY",
+            value=(_env_key[:6] + "…" if _env_key else ""),
+            type="password",
+            help="Set in .env",
+        )
 
 # Messages state
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! Ask for /price, /dividends, /splits, /info, /news, /compare — or enable the LLM planner in the sidebar to ask natural questions."}
+        {
+            "role": "assistant",
+            "content": "Hi! Ask for /price, /dividends, /splits, /info, /news, /compare — "
+            "or enable the LLM planner in the sidebar to ask natural questions.",
+        }
     ]
 # Which panel to show
 if "active_view" not in st.session_state:
@@ -294,11 +362,15 @@ if user_msg:
         if provider == "OpenAI":
             plan = plan_with_openai(user_msg)
             if plan is None:
-                llm_warning = "OpenAI planner could not interpret your request (check API key/connectivity)."
+                llm_warning = (
+                    "OpenAI planner could not interpret your request (check API key/connectivity)."
+                )
         elif provider == "Ollama (local)":
             plan = plan_with_ollama(user_msg)
             if plan is None:
-                llm_warning = "Ollama planner not reachable (is `ollama serve` running, model pulled?)."
+                llm_warning = (
+                    "Ollama planner not reachable (is `ollama serve` running, model pulled?)."
+                )
     if not plan:
         plan = {"action": "help", "args": {}}
 
@@ -316,7 +388,7 @@ if user_msg:
             end = args.get("end")
             interval = args.get("interval", "1d")
             try:
-                df = fetch_history(ticker.upper(), start, end, interval)
+                df = fetch_history(ticker.upper(), start, end, interval)  # type: ignore[union-attr]
                 if df.empty:
                     st.error("No data returned. Check ticker/dates/interval.")
                 else:
@@ -339,7 +411,9 @@ if user_msg:
             end = args.get("end")
             interval = args.get("interval", "1d")
             if not (isinstance(tickers, (list, tuple)) and len(tickers) >= 2):
-                st.error("Compare needs two tickers, e.g., /compare TSLA F 2024-03-01 2024-09-20 1d")
+                st.error(
+                    "Compare needs two tickers, e.g., /compare TSLA F 2024-03-01 2024-09-20 1d"
+                )
             else:
                 t1, t2 = str(tickers[0]).upper(), str(tickers[1]).upper()
                 try:
@@ -369,7 +443,7 @@ if user_msg:
             if note:
                 st.info(note)
             try:
-                df = fetch_dividends(ticker.upper())
+                df = fetch_dividends(ticker.upper())  # type: ignore[union-attr]
                 st.session_state["last_dividends"] = {"df": df, "ticker": ticker.upper()}
                 st.session_state.active_view = "dividends"
                 st.success(f"Showing dividends for {ticker.upper()}.")
@@ -383,7 +457,7 @@ if user_msg:
             if note:
                 st.info(note)
             try:
-                df = fetch_splits(ticker.upper())
+                df = fetch_splits(ticker.upper())  # type: ignore[union-attr]
                 st.session_state["last_splits"] = {"df": df, "ticker": ticker.upper()}
                 st.session_state.active_view = "splits"
                 st.success(f"Showing splits for {ticker.upper()}.")
@@ -397,7 +471,7 @@ if user_msg:
             if note:
                 st.info(note)
             try:
-                info = fetch_info(ticker.upper())
+                info = fetch_info(ticker.upper())  # type: ignore[union-attr]
                 st.session_state["last_info"] = {"info": info, "ticker": ticker.upper()}
                 st.session_state.active_view = "info"
                 st.success(f"Showing company snapshot for {ticker.upper()}.")
@@ -411,7 +485,7 @@ if user_msg:
             if note:
                 st.info(note)
             try:
-                news = fetch_news(ticker.upper())
+                news = fetch_news(ticker.upper())  # type: ignore[union-attr]
                 st.session_state["last_news"] = {"news": news, "ticker": ticker.upper()}
                 st.session_state.active_view = "news"
                 st.success(f"Showing news for {ticker.upper()}.")
@@ -453,13 +527,17 @@ elif view == "compare" and "last_compare" in st.session_state:
     normalize = st.checkbox("Normalize to 100 at start", value=True, key="compare_norm")
     plot_df = df.sort_values(["Ticker", "date"]).copy()
     if normalize:
+
         def first_non_null(s: pd.Series):
             s2 = s.dropna()
             return s2.iloc[0] if not s2.empty else pd.NA
+
         first_close = plot_df.groupby("Ticker")["Close"].transform(first_non_null)
         plot_df["Close_norm"] = (plot_df["Close"] / first_close) * 100
         if plot_df["Close_norm"].dropna().empty:
-            st.warning("Normalization yielded no values (missing prices at the start). Showing raw Close instead.")
+            st.warning(
+                "Normalization yielded no values (missing prices at the start). Showing raw Close instead."
+            )
             y_col, y_title = "Close", "Close"
         else:
             y_col, y_title = "Close_norm", "Indexed to 100"
@@ -548,7 +626,7 @@ elif view == "news" and "last_news" in st.session_state:
         st.info(f"No news for {ticker}.")
     else:
         top_n = st.selectbox("Show top N items", [5, 10, 20, 50], index=1, key="news_topn")
-        seen = set()
+        seen: set[tuple[str, str]] = set()
         for item in news[:top_n]:
             n = normalize_news_item(item)
             title = n["title"] or _slug_from_url(n["link"])
@@ -572,4 +650,7 @@ elif view == "news" and "last_news" in st.session_state:
             st.divider()
 
 # ---------------- Footer ----------------
-st.write("\n\n—\n**Disclaimer**: This app uses yfinance (which scrapes Yahoo Finance). Data may be delayed or inaccurate. Educational use only, not financial advice.")
+st.write(
+    "\n\n—\n**Disclaimer**: This app uses yfinance (which scrapes Yahoo Finance). "
+    "Data may be delayed or inaccurate. Educational use only, not financial advice."
+)
